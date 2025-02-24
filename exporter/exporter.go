@@ -153,6 +153,9 @@ func (p *Exporter) updateMetrics(event auditv1.Event) {
 	if event.Stage != auditv1.StageResponseComplete {
 		return
 	}
+	if event.Level != auditv1.LevelMetadata {
+		return
+	}
 	userAgent := p.extractUserAgent(event.UserAgent)
 
 	resource := p.buildResourceName(event.ObjectRef)
@@ -178,6 +181,9 @@ func (p *Exporter) extractUserAgent(ua string) string {
 
 // buildResourceName constructs resource identifier
 func (p *Exporter) buildResourceName(ref *auditv1.ObjectReference) string {
+	if ref == nil {
+		return "NONE"
+	}
 	resource := ref.Resource
 	if ref.Subresource != "" {
 		resource += "/" + ref.Subresource
