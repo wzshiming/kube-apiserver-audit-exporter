@@ -27,9 +27,9 @@ var (
 		Help: "Total number of API requests to the scheduler",
 	}, []string{"user", "verb", "resource", "code"})
 
-	schedulingLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "binding_latency_seconds",
-		Help: "Scheduling binding latency distribution in seconds",
+	podSchedulingLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "pod_scheduling_latency_seconds",
+		Help: "Duration from pod creation to scheduled on node in seconds",
 		Buckets: []float64{
 			0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9,
 			1, 2, 3, 4, 5, 6, 7, 8, 9,
@@ -37,7 +37,17 @@ var (
 			100, 200, 300, 400, 500, 600},
 	}, []string{"user"})
 
+	batchJobCompleteLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "batchjob_completion_latency_seconds",
+		Help: "Time from job creation to complete condition in seconds",
+		Buckets: []float64{
+			1, 2, 3, 4, 5, 6, 7, 8, 9,
+			10, 20, 30, 40, 50, 60, 70, 80, 90,
+			100, 200, 300, 400, 500, 600},
+	}, []string{"user"})
+
 	podCreationTimes = map[Target]*time.Time{}
+	jobCreationTimes = map[Target]*time.Time{}
 )
 
 // Target represents a Kubernetes resource Target
@@ -47,7 +57,11 @@ type Target struct {
 }
 
 func init() {
-	registry.MustRegister(apiRequests, schedulingLatency)
+	registry.MustRegister(
+		apiRequests,
+		podSchedulingLatency,
+		batchJobCompleteLatency,
+	)
 }
 
 func NewExporter(file string, offset int64) *Exporter {
@@ -153,10 +167,19 @@ func (p *Exporter) processFileUpdate(path string) error {
 // updateMetrics processes audit event and updates metrics
 func (p *Exporter) updateMetrics(event auditv1.Event) {
 	switch {
-	case event.Level == auditv1.LevelMetadata && event.Stage == auditv1.StageResponseComplete:
+	case event.Level == auditv1.LevelMetadata &&
+		event.Stage == auditv1.StageResponseComplete:
 		p.recordAPICall(event)
-	case event.Level == auditv1.LevelRequestResponse && event.Stage == auditv1.StageResponseComplete && event.ObjectRef.Resource == "pods":
+	case event.Level == auditv1.LevelRequestResponse &&
+		event.Stage == auditv1.StageResponseComplete &&
+		event.ObjectRef.Resource == "pods" &&
+		event.ResponseStatus.Code >= 200 && event.ResponseStatus.Code < 300:
 		p.recordPodScheduling(event)
+	case event.Level == auditv1.LevelRequestResponse &&
+		event.Stage == auditv1.StageResponseComplete &&
+		event.ObjectRef.Resource == "jobs" &&
+		event.ResponseStatus.Code >= 200 && event.ResponseStatus.Code < 300:
+		p.recordBatchJobScheduling(event)
 	}
 }
 
@@ -172,7 +195,7 @@ func extractUserAgent(ua string) string {
 func extractResourceName(event auditv1.Event) string {
 	ref := event.ObjectRef
 	if ref == nil {
-		return strings.SplitN(event.RequestURI, "?", 2)[0]
+		return "None"
 	}
 
 	var builder strings.Builder
@@ -197,6 +220,77 @@ func (p *Exporter) buildTarget(ref *auditv1.ObjectReference) Target {
 	return Target{
 		Name:      ref.Name,
 		Namespace: ref.Namespace,
+	}
+}
+
+func (p *Exporter) recordBatchJobScheduling(event auditv1.Event) {
+	switch event.Verb {
+	case "delete":
+		target := p.buildTarget(event.ObjectRef)
+		createTime, exists := jobCreationTimes[target]
+		if !exists {
+			return
+		}
+		if createTime == nil {
+			return
+		}
+
+		var job BatchJob
+		err := json.Unmarshal(event.ResponseObject.Raw, &job)
+		if err != nil {
+			slog.Error("failed to unmarshal job", "err", err)
+			return
+		}
+		if job.Status.IsCompleted() {
+			latency := event.StageTimestamp.Sub(*createTime).Seconds()
+			user := extractUserAgent(event.UserAgent)
+			batchJobCompleteLatency.WithLabelValues(
+				user,
+			).Observe(latency)
+			jobCreationTimes[target] = nil
+		}
+
+	case "create":
+		var batchjob BatchJob
+		err := json.Unmarshal(event.ResponseObject.Raw, &batchjob)
+		if err != nil {
+			slog.Error("failed to unmarshal job", "err", err)
+			return
+		}
+
+		target := Target{
+			Name:      batchjob.Metadata.Name,
+			Namespace: batchjob.Metadata.Namespace,
+		}
+
+		jobCreationTimes[target] = &event.StageTimestamp.Time
+
+	case "patch", "update":
+		target := p.buildTarget(event.ObjectRef)
+		createTime, exists := jobCreationTimes[target]
+		if !exists {
+			return
+		}
+
+		if createTime == nil {
+			return
+		}
+
+		var job BatchJob
+		err := json.Unmarshal(event.ResponseObject.Raw, &job)
+		if err != nil {
+			slog.Error("failed to unmarshal job", "err", err)
+			return
+		}
+		if job.Status.IsCompleted() {
+			latency := event.StageTimestamp.Sub(*createTime).Seconds()
+			user := extractUserAgent(event.UserAgent)
+			batchJobCompleteLatency.WithLabelValues(
+				user,
+			).Observe(latency)
+			jobCreationTimes[target] = nil
+		}
+	default:
 	}
 }
 
@@ -243,7 +337,7 @@ func (p *Exporter) recordPodScheduling(event auditv1.Event) {
 		if pod.Spec.NodeName != "" {
 			latency := event.RequestReceivedTimestamp.Sub(*createTime).Seconds()
 			user := extractUserAgent(event.UserAgent)
-			schedulingLatency.WithLabelValues(
+			podSchedulingLatency.WithLabelValues(
 				user,
 			).Observe(latency)
 			podCreationTimes[target] = nil
