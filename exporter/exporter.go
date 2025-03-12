@@ -57,16 +57,20 @@ func init() {
 	)
 }
 
-func NewExporter(file string, offset int64) *Exporter {
+func NewExporter(file string, offset int64, replay bool) *Exporter {
 	return &Exporter{
 		file:   file,
 		offset: offset,
+		replay: replay,
 	}
 }
 
 type Exporter struct {
 	file   string
 	offset int64
+
+	replay   bool
+	timeDiff time.Duration
 }
 
 // run initializes the application components
@@ -150,6 +154,17 @@ func (p *Exporter) processFileUpdate(path string) error {
 		var event auditv1.Event
 		if err := json.Unmarshal(line, &event); err != nil {
 			return fmt.Errorf("json decode error: %w", err)
+		}
+
+		if p.replay {
+			if p.timeDiff == 0 {
+				p.timeDiff = time.Since(event.StageTimestamp.Time)
+			} else {
+				// Simulation has been collected to EOF
+				if time.Since(event.StageTimestamp.Time) < p.timeDiff {
+					return nil
+				}
+			}
 		}
 
 		p.updateMetrics(event)
