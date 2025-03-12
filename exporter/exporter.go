@@ -29,6 +29,12 @@ func WithReplay(replay bool) Option {
 	}
 }
 
+func WithClusterLabel(c string) Option {
+	return func(e *Exporter) {
+		e.clusterLabel = c
+	}
+}
+
 func NewExporter(opts ...Option) *Exporter {
 	e := &Exporter{}
 
@@ -43,8 +49,9 @@ type Exporter struct {
 	file   string
 	offset int64
 
-	replay   bool
-	timeDiff time.Duration
+	clusterLabel string
+	replay       bool
+	timeDiff     time.Duration
 }
 
 // run initializes the application components
@@ -141,7 +148,7 @@ func (p *Exporter) processFileUpdate(path string) error {
 			}
 		}
 
-		updateMetrics(event)
+		updateMetrics(p.clusterLabel, event)
 		p.offset += int64(len(line))
 	}
 }

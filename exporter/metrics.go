@@ -17,19 +17,19 @@ var (
 	apiRequests = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "api_requests_total",
 		Help: "Total number of API requests to the scheduler",
-	}, []string{"user", "verb", "resource", "code"})
+	}, []string{"cluster", "user", "verb", "resource", "code"})
 
 	podSchedulingLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pod_scheduling_latency_seconds",
 		Help:    "Duration from pod creation to scheduled on node in seconds",
 		Buckets: prometheus.ExponentialBuckets(0.001, 2, 20),
-	}, []string{"user"})
+	}, []string{"cluster", "user"})
 
 	batchJobCompleteLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "batchjob_completion_latency_seconds",
 		Help:    "Time from job creation to complete condition in seconds",
 		Buckets: prometheus.ExponentialBuckets(1, 2, 12),
-	}, []string{"user"})
+	}, []string{"cluster", "user"})
 )
 
 func init() {
@@ -46,7 +46,7 @@ var (
 )
 
 // updateMetrics processes audit event and updates metrics
-func updateMetrics(event auditv1.Event) {
+func updateMetrics(clusterLabel string, event auditv1.Event) {
 	if event.ResponseStatus == nil ||
 		(event.ResponseStatus.Code < 200 || event.ResponseStatus.Code >= 300) {
 		return
@@ -54,6 +54,7 @@ func updateMetrics(event auditv1.Event) {
 
 	if event.Stage == auditv1.StageResponseComplete {
 		labels := []string{
+			clusterLabel,
 			extractUserAgent(event.UserAgent),
 			event.Verb,
 			extractResourceName(event),
@@ -80,6 +81,7 @@ func updateMetrics(event auditv1.Event) {
 
 				user := extractUserAgent(event.UserAgent)
 				podSchedulingLatency.WithLabelValues(
+					clusterLabel,
 					user,
 				).Observe(latency)
 				podCreationTimes[target] = nil
@@ -137,6 +139,7 @@ func updateMetrics(event auditv1.Event) {
 						latency := event.StageTimestamp.Sub(job.Metadata.CreationTimestamp).Seconds()
 						user := extractUserAgent(event.UserAgent)
 						batchJobCompleteLatency.WithLabelValues(
+							clusterLabel,
 							user,
 						).Observe(latency)
 						batchJobCreationTimes[target] = nil
