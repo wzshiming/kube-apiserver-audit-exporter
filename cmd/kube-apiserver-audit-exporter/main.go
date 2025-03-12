@@ -22,7 +22,10 @@ func init() {
 }
 
 func main() {
-	e := exporter.NewExporter(auditLogPath, 0, replay)
+	e := exporter.NewExporter(
+		exporter.WithFile(auditLogPath),
+		exporter.WithReplay(replay),
+	)
 
 	if err := e.ListenAndServe(address); err != nil {
 		slog.Error("Failed", "err", err)

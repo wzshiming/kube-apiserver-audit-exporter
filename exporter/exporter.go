@@ -57,12 +57,28 @@ func init() {
 	)
 }
 
-func NewExporter(file string, offset int64, replay bool) *Exporter {
-	return &Exporter{
-		file:   file,
-		offset: offset,
-		replay: replay,
+type Option func(e *Exporter)
+
+func WithFile(file string) Option {
+	return func(e *Exporter) {
+		e.file = file
 	}
+}
+
+func WithReplay(replay bool) Option {
+	return func(e *Exporter) {
+		e.replay = replay
+	}
+}
+
+func NewExporter(opts ...Option) *Exporter {
+	e := &Exporter{}
+
+	for _, opt := range opts {
+		opt(e)
+	}
+
+	return e
 }
 
 type Exporter struct {
