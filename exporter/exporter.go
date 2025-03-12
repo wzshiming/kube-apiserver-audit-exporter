@@ -36,7 +36,7 @@ var (
 	batchJobCompleteLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "batchjob_completion_latency_seconds",
 		Help:    "Time from job creation to complete condition in seconds",
-		Buckets: prometheus.ExponentialBuckets(1, 2, 10),
+		Buckets: prometheus.ExponentialBuckets(1, 2, 12),
 	}, []string{"user"})
 
 	podCreationTimes      = map[Target]*time.Time{}
