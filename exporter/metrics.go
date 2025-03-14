@@ -17,19 +17,19 @@ var (
 	apiRequests = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "api_requests_total",
 		Help: "Total number of API requests to the scheduler",
-	}, []string{"cluster", "user", "verb", "resource", "code"})
+	}, []string{"cluster", "namespace", "user", "verb", "resource", "code"})
 
 	podSchedulingLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pod_scheduling_latency_seconds",
 		Help:    "Duration from pod creation to scheduled on node in seconds",
 		Buckets: prometheus.ExponentialBuckets(0.001, 2, 20),
-	}, []string{"cluster", "user"})
+	}, []string{"cluster", "namespace", "user"})
 
 	batchJobCompleteLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "batchjob_completion_latency_seconds",
 		Help:    "Time from job creation to complete condition in seconds",
 		Buckets: prometheus.ExponentialBuckets(1, 2, 12),
-	}, []string{"cluster", "user"})
+	}, []string{"cluster", "namespace", "user"})
 )
 
 func init() {
@@ -52,9 +52,15 @@ func updateMetrics(clusterLabel string, event auditv1.Event) {
 		return
 	}
 
+	var ns string
+	if event.ObjectRef != nil {
+		ns = event.ObjectRef.Namespace
+	}
+
 	if event.Stage == auditv1.StageResponseComplete {
 		labels := []string{
 			clusterLabel,
+			ns,
 			extractUserAgent(event.UserAgent),
 			event.Verb,
 			extractResourceName(event),
@@ -82,6 +88,7 @@ func updateMetrics(clusterLabel string, event auditv1.Event) {
 				user := extractUserAgent(event.UserAgent)
 				podSchedulingLatency.WithLabelValues(
 					clusterLabel,
+					ns,
 					user,
 				).Observe(latency)
 				podCreationTimes[target] = nil
@@ -140,6 +147,7 @@ func updateMetrics(clusterLabel string, event auditv1.Event) {
 						user := extractUserAgent(event.UserAgent)
 						batchJobCompleteLatency.WithLabelValues(
 							clusterLabel,
+							ns,
 							user,
 						).Observe(latency)
 						batchJobCreationTimes[target] = nil
