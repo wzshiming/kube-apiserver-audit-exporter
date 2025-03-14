@@ -124,7 +124,7 @@ func (p *Exporter) processFileUpdate(path string) error {
 		slog.Info("File processing complete", "new_offset", p.offset, "duration", time.Since(start))
 	}()
 
-	reader := bufio.NewReaderSize(file, 1<<20) // 1MB buffer
+	reader := bufio.NewReaderSize(file, 32*1024*1024)
 	for {
 		line, err := reader.ReadSlice('\n')
 		if err != nil {
