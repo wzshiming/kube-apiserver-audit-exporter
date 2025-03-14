@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"strconv"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	auditv1 "k8s.io/apiserver/pkg/apis/audit/v1"
@@ -40,13 +39,8 @@ func init() {
 	)
 }
 
-var (
-	podCreationTimes      = map[target]*time.Time{}
-	batchJobCreationTimes = map[target]*time.Time{}
-)
-
 // updateMetrics processes audit event and updates metrics
-func updateMetrics(clusterLabel string, event auditv1.Event) {
+func (p *Exporter) updateMetrics(clusterLabel string, event auditv1.Event) {
 	if event.ResponseStatus == nil ||
 		(event.ResponseStatus.Code < 200 || event.ResponseStatus.Code >= 300) {
 		return
@@ -74,7 +68,7 @@ func updateMetrics(clusterLabel string, event auditv1.Event) {
 		case "pods":
 			if event.ObjectRef.Subresource == "binding" && event.Verb == "create" {
 				target := buildTarget(event.ObjectRef)
-				createTime, exists := podCreationTimes[target]
+				createTime, exists := p.podCreationTimes[target]
 				if !exists {
 					slog.Warn("Pod not found", "target", target)
 					return
@@ -91,7 +85,7 @@ func updateMetrics(clusterLabel string, event auditv1.Event) {
 					ns,
 					user,
 				).Observe(latency)
-				podCreationTimes[target] = nil
+				p.podCreationTimes[target] = nil
 
 			} else {
 				if event.Verb == "create" {
@@ -107,12 +101,12 @@ func updateMetrics(clusterLabel string, event auditv1.Event) {
 						Namespace: pod.Metadata.Namespace,
 					}
 					if pod.Spec.NodeName == "" {
-						podCreationTimes[target] = &event.StageTimestamp.Time
+						p.podCreationTimes[target] = &event.StageTimestamp.Time
 					} else {
-						podCreationTimes[target] = nil
+						p.podCreationTimes[target] = nil
 					}
 				} else if event.Verb == "delete" {
-					delete(podCreationTimes, buildTarget(event.ObjectRef))
+					delete(p.podCreationTimes, buildTarget(event.ObjectRef))
 				}
 			}
 
@@ -129,13 +123,13 @@ func updateMetrics(clusterLabel string, event auditv1.Event) {
 					Name:      job.Metadata.Name,
 					Namespace: job.Metadata.Namespace,
 				}
-				batchJobCreationTimes[target] = &event.StageTimestamp.Time
+				p.batchJobCreationTimes[target] = &event.StageTimestamp.Time
 			} else if event.Verb == "delete" {
 				target := buildTarget(event.ObjectRef)
-				delete(batchJobCreationTimes, target)
+				delete(p.batchJobCreationTimes, target)
 			} else {
 				target := buildTarget(event.ObjectRef)
-				if createTime, ok := batchJobCreationTimes[target]; ok && createTime != nil && event.ResponseObject != nil {
+				if createTime, ok := p.batchJobCreationTimes[target]; ok && createTime != nil && event.ResponseObject != nil {
 					var job BatchJob
 					err := json.Unmarshal(event.ResponseObject.Raw, &job)
 					if err != nil {
@@ -150,7 +144,7 @@ func updateMetrics(clusterLabel string, event auditv1.Event) {
 							ns,
 							user,
 						).Observe(latency)
-						batchJobCreationTimes[target] = nil
+						p.batchJobCreationTimes[target] = nil
 					}
 				}
 			}

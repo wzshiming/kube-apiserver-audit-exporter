@@ -36,7 +36,10 @@ func WithClusterLabel(c string) Option {
 }
 
 func NewExporter(opts ...Option) *Exporter {
-	e := &Exporter{}
+	e := &Exporter{
+		podCreationTimes:      map[target]*time.Time{},
+		batchJobCreationTimes: map[target]*time.Time{},
+	}
 
 	for _, opt := range opts {
 		opt(e)
@@ -52,18 +55,22 @@ type Exporter struct {
 	clusterLabel string
 	replay       bool
 	timeDiff     time.Duration
+
+	podCreationTimes      map[target]*time.Time
+	batchJobCreationTimes map[target]*time.Time
 }
 
-// run initializes the application components
-func (p *Exporter) ListenAndServe(addr string) error {
+func (p *Exporter) Start() {
+	// Process audit events
+	go p.processAuditEvents()
+}
+
+func ListenAndServe(addr string) error {
 	mux := http.NewServeMux()
 	handler := promhttp.HandlerFor(registry, promhttp.HandlerOpts{
 		EnableOpenMetrics: true,
 	})
 	mux.Handle("/metrics", handler)
-
-	// Process audit events
-	go p.processAuditEvents()
 
 	slog.Info("Service started", "address", addr)
 	return http.ListenAndServe(addr, mux)
@@ -148,7 +155,7 @@ func (p *Exporter) processFileUpdate(path string) error {
 			}
 		}
 
-		updateMetrics(p.clusterLabel, event)
+		p.updateMetrics(p.clusterLabel, event)
 		p.offset += int64(len(line))
 	}
 }
