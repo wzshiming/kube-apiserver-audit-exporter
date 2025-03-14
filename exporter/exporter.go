@@ -54,16 +54,17 @@ type Exporter struct {
 	timeDiff     time.Duration
 }
 
-// run initializes the application components
-func (p *Exporter) ListenAndServe(addr string) error {
+func (p *Exporter) Start() {
+	// Process audit events
+	go p.processAuditEvents()
+}
+
+func ListenAndServe(addr string) error {
 	mux := http.NewServeMux()
 	handler := promhttp.HandlerFor(registry, promhttp.HandlerOpts{
 		EnableOpenMetrics: true,
 	})
 	mux.Handle("/metrics", handler)
-
-	// Process audit events
-	go p.processAuditEvents()
 
 	slog.Info("Service started", "address", addr)
 	return http.ListenAndServe(addr, mux)
