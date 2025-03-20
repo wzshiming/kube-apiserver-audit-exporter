@@ -18,6 +18,11 @@ var (
 		Help: "Total number of API requests to the scheduler",
 	}, []string{"cluster", "namespace", "user", "verb", "resource", "code"})
 
+	podDeletedRunning = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "pod_deleted_running_total",
+		Help: "Total number of pods deleted while in running state",
+	}, []string{"cluster", "namespace", "user"})
+
 	podSchedulingLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pod_scheduling_latency_seconds",
 		Help:    "Duration from pod creation to scheduled on node in seconds",
@@ -35,6 +40,7 @@ func init() {
 	registry.MustRegister(
 		apiRequests,
 		podSchedulingLatency,
+		podDeletedRunning,
 		batchJobCompleteLatency,
 	)
 }
@@ -107,6 +113,22 @@ func (p *Exporter) updateMetrics(clusterLabel string, event auditv1.Event) {
 					}
 				} else if event.Verb == "delete" {
 					delete(p.podCreationTimes, buildTarget(event.ObjectRef))
+
+					if event.ResponseObject != nil {
+						var pod Pod
+						if err := json.Unmarshal(event.ResponseObject.Raw, &pod); err != nil {
+							slog.Error("failed to unmarshal pod during delete", "err", err)
+							return
+						}
+						if pod.Status.Phase == "Running" {
+							user := extractUserAgent(event.UserAgent)
+							podDeletedRunning.WithLabelValues(
+								clusterLabel,
+								ns,
+								user,
+							).Inc()
+						}
+					}
 				}
 			}
 
