@@ -23,6 +23,7 @@ type PodSpec struct {
 }
 
 type PodStatus struct {
+	Phase     string      `json:"phase"`
 	Condition []Condition `json:"conditions"`
 }
 
