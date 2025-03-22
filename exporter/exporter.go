@@ -90,7 +90,7 @@ func (p *Exporter) processAuditEvents() {
 // handleFileEvent processes filesystem events
 func (p *Exporter) handleFileEvent(path string) {
 	if err := p.processFileUpdate(path); err != nil {
-		slog.Error("Error processing file", "error", err)
+		slog.Error("Error processing file", "cluster", p.clusterLabel, "error", err)
 	}
 }
 
@@ -102,10 +102,10 @@ func (p *Exporter) processFileUpdate(path string) error {
 	}
 
 	if size := fileInfo.Size(); size < p.offset {
-		slog.Info("Log file truncated, resetting offset")
+		slog.Info("Log file truncated, resetting offset", "cluster", p.clusterLabel)
 		p.offset = 0
 	} else if size == p.offset {
-		slog.Info("No new updates in log file", "offset", p.offset)
+		slog.Info("No new updates in log file", "cluster", p.clusterLabel, "offset", p.offset)
 		return nil
 	}
 
@@ -121,7 +121,7 @@ func (p *Exporter) processFileUpdate(path string) error {
 
 	start := time.Now()
 	defer func() {
-		slog.Info("File processing complete", "new_offset", p.offset, "duration", time.Since(start))
+		slog.Info("File processing complete", "cluster", p.clusterLabel, "new_offset", p.offset, "duration", time.Since(start))
 	}()
 
 	reader := bufio.NewReaderSize(file, 1<<24) // 16MB buffer
