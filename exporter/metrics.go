@@ -76,7 +76,14 @@ func (p *Exporter) updateMetrics(clusterLabel string, event auditv1.Event) {
 				target := buildTarget(event.ObjectRef)
 				createTime, exists := p.podCreationTimes[target]
 				if !exists {
-					slog.Warn("Pod not found", "target", target)
+					// Kueue's audit events may create pod/binding events before pod creation events
+					user := extractUserAgent(event.UserAgent)
+					podSchedulingLatency.WithLabelValues(
+						clusterLabel,
+						ns,
+						user,
+					).Observe(0)
+					p.podCreationTimes[target] = nil
 					return
 				}
 
