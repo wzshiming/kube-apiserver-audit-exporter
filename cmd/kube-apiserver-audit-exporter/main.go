@@ -27,30 +27,64 @@ func init() {
 	pflag.Parse()
 }
 
-func main() {
-	go func() {
-		if delay > 0 {
-			time.Sleep(delay)
-		}
-		for _, p := range auditLogPath {
-			ns := strings.SplitN(p, ":", 2)
-			path := ns[0]
-			clusterLabel := cluster
-			if len(ns) > 1 {
-				clusterLabel = ns[1]
-			}
+func monitorAndStartExporters() {
+	paths := make([]string, 0, len(auditLogPath))
+	labels := make([]string, 0, len(auditLogPath))
 
-			e := exporter.NewExporter(
-				exporter.WithReplay(replay),
-				exporter.WithFile(path),
-				exporter.WithClusterLabel(clusterLabel),
-			)
-			e.Start()
+	for _, p := range auditLogPath {
+		path, label := getPathAndLabel(p)
+		paths = append(paths, path)
+		labels = append(labels, label)
+	}
+
+	for !validAuditLogs(paths) {
+		time.Sleep(time.Second)
+	}
+
+	if delay > 0 {
+		time.Sleep(delay)
+	}
+
+	for i, path := range paths {
+		e := exporter.NewExporter(
+			exporter.WithReplay(replay),
+			exporter.WithFile(path),
+			exporter.WithClusterLabel(labels[i]),
+		)
+		go e.Run()
+	}
+}
+
+func validAuditLogs(paths []string) bool {
+	for _, p := range paths {
+		info, err := os.Stat(p)
+		if err != nil {
+			slog.Warn("Failed to stat audit log", "path", p, "err", err)
+			return false
 		}
-	}()
+		if info.Size() == 0 {
+			slog.Info("Audit log is empty, waiting for content", "path", p)
+			return false
+		}
+	}
+	return true
+}
+
+func getPathAndLabel(s string) (string, string) {
+	parts := strings.SplitN(s, ":", 2)
+	path := parts[0]
+	clusterLabel := cluster
+	if len(parts) > 1 {
+		clusterLabel = parts[1]
+	}
+	return path, clusterLabel
+}
+
+func main() {
+	go monitorAndStartExporters()
 
 	if err := exporter.ListenAndServe(address); err != nil {
-		slog.Error("Failed", "err", err)
+		slog.Error("Failed to start metrics server", "err", err)
 		os.Exit(1)
 	}
 }
