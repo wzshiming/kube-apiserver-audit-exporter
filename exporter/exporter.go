@@ -138,8 +138,13 @@ func (p *Exporter) processFileUpdate(path string) error {
 		}
 
 		// This means that we have mislocated the read and can no longer continue execution
-		if !bytes.HasPrefix(line, []byte{'{'}) || !bytes.HasSuffix(line, []byte{'}', '\n'}) {
+		if !bytes.HasSuffix(line, []byte{'}', '\n'}) {
 			return fmt.Errorf("malformed log entry: %q", line)
+		}
+
+		if !bytes.HasPrefix(line, []byte{'{'}) {
+			p.offset += int64(len(line))
+			continue
 		}
 
 		var event auditv1.Event
