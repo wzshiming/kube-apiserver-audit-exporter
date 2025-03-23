@@ -121,6 +121,11 @@ func (p *Exporter) processFileUpdate(path string) error {
 
 	reader := bufio.NewReaderSize(file, 1<<20) // 1MB buffer
 	for {
+		err := p.skipNull(reader)
+		if err != err {
+			return err
+		}
+
 		line, err := reader.ReadSlice('\n')
 		if err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
@@ -153,4 +158,24 @@ func (p *Exporter) processFileUpdate(path string) error {
 		p.updateMetrics(p.clusterLabel, event)
 		p.offset += int64(len(line))
 	}
+}
+
+func (p *Exporter) skipNull(reader *bufio.Reader) error {
+	for {
+		peek, err := reader.Peek(1)
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return fmt.Errorf("peek error: %w", err)
+		}
+		if peek[0] != 0 {
+			break
+		}
+		if _, err := reader.ReadByte(); err != nil {
+			return fmt.Errorf("read null byte error: %w", err)
+		}
+		p.offset++
+	}
+	return nil
 }
