@@ -23,6 +23,11 @@ var (
 		Help: "Total number of pods deleted",
 	}, []string{"cluster", "namespace", "user", "phase"})
 
+	podCompletedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "pod_completed_total",
+		Help: "Total number of pods transitioned to completed status",
+	}, []string{"cluster", "namespace", "user", "phase"})
+
 	podSchedulingLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "pod_scheduling_latency_seconds",
 		Help:    "Duration from pod creation to scheduled on node in seconds",
@@ -42,6 +47,7 @@ func init() {
 		podSchedulingLatency,
 		podDeletedTotal,
 		batchJobCompleteLatency,
+		podCompletedTotal,
 	)
 }
 
@@ -76,14 +82,7 @@ func (p *Exporter) updateMetrics(clusterLabel string, event auditv1.Event) {
 				target := buildTarget(event.ObjectRef)
 				createTime, exists := p.podCreationTimes[target]
 				if !exists {
-					// Kueue's audit events may create pod/binding events before pod creation events
-					user := extractUserAgent(event.UserAgent)
-					podSchedulingLatency.WithLabelValues(
-						clusterLabel,
-						ns,
-						user,
-					).Observe(0)
-					p.podCreationTimes[target] = nil
+					slog.Warn("Pod not found", "target", target)
 					return
 				}
 
@@ -118,16 +117,17 @@ func (p *Exporter) updateMetrics(clusterLabel string, event auditv1.Event) {
 					} else {
 						p.podCreationTimes[target] = nil
 					}
-				} else if event.Verb == "delete" {
-					delete(p.podCreationTimes, buildTarget(event.ObjectRef))
-
-					if event.ResponseObject != nil {
+				} else if event.Verb == "delete" && event.ResponseObject != nil {
+					target := buildTarget(event.ObjectRef)
+					_, ok := p.podCreationTimes[target]
+					if ok {
 						var pod Pod
 						if err := json.Unmarshal(event.ResponseObject.Raw, &pod); err != nil {
 							slog.Error("failed to unmarshal pod during delete", "err", err)
 							return
 						}
 
+						delete(p.podCreationTimes, target)
 						user := extractUserAgent(event.UserAgent)
 						podDeletedTotal.WithLabelValues(
 							clusterLabel,
@@ -135,6 +135,31 @@ func (p *Exporter) updateMetrics(clusterLabel string, event auditv1.Event) {
 							user,
 							pod.Status.Phase,
 						).Inc()
+					}
+				} else if (event.Verb == "update" || event.Verb == "patch") &&
+					event.ObjectRef.Subresource == "status" &&
+					event.ResponseObject != nil {
+
+					target := buildTarget(event.ObjectRef)
+					t, ok := p.podCreationTimes[target]
+					if ok && t == nil {
+						var pod Pod
+						if err := json.Unmarshal(event.ResponseObject.Raw, &pod); err != nil {
+							slog.Error("failed to unmarshal new pod during update", "err", err)
+							return
+						}
+
+						phase := pod.Status.Phase
+						if podCompletedPhases[phase] {
+							delete(p.podCreationTimes, target)
+							user := extractUserAgent(event.UserAgent)
+							podCompletedTotal.WithLabelValues(
+								clusterLabel,
+								ns,
+								user,
+								phase,
+							).Inc()
+						}
 					}
 				}
 			}
@@ -180,3 +205,5 @@ func (p *Exporter) updateMetrics(clusterLabel string, event auditv1.Event) {
 		}
 	}
 }
+
+var podCompletedPhases = map[string]bool{"Succeeded": true, "Failed": true}

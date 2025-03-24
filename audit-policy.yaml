@@ -11,6 +11,7 @@ rules:
     resources:
     - pods
     - pods/binding
+    - pods/status
   - group: batch
     resources:
     - jobs
